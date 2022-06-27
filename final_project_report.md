@@ -6,7 +6,7 @@
  <br>
 
 <h3 align="center"> Modeling Complex Biological Systems </h3>
-<h2 align="center"> FINAL PROJECT </h2>
+<h2 align="center"> FINAL PROJECT REPORT </h2>
 
  <br>
 
@@ -75,7 +75,7 @@ In both expression sets, expression values range from -2 to 2; according to [1],
  <br>
  
 ### Methods
-All steps of analysis are available on github [GitHub Repository](https://github.com/msudolm/MSB-Final-Project/blob/main/README.md) as RMarkdown files.
+All steps of analysis are available on github [GitHub Repository](https://github.com/msudolm/MSB-Final-Project/blob/main) as RMarkdown files.
 <br>
 
 #### Veer study replication
