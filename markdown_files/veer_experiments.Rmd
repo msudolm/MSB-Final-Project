@@ -1,0 +1,916 @@
+---
+title: "vFinal Project - Veer experimental"
+author: "Małgorzata Sudoł"
+#date: '2022-06-23'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+
+# PART I -- TRAINING
+
+## 0. Loading data
+
+### Loading packages.
+```{r}
+#install.packages("pca3d")
+
+#packages
+library(genefilter) # t-test for large data
+
+library(tidyverse)
+library(qvalue)
+library(data.table)
+library(pca3d)
+```
+
+### Loading Veer data.
+```{r}
+#data
+library("cancerdata")
+data("VEER")
+dim(VEER)
+``` 
+
+### Extracting expression and phenotype data from ExpressionSet.
+```{r}
+veer.pdata=pData(VEER)
+veer.edata=as.matrix(exprs(VEER))
+```
+
+#### Phenotype data - basic information
+```{r}
+dim(veer.pdata)
+head(veer.pdata)
+sum(veer.pdata$class == "DM")
+sum(veer.pdata$class == "NODM")
+```
+
+#### Expression data - basic information
+```{r}
+dim(veer.edata)
+veer.edata[1:5, 1:5]
+
+veer.all.genes <- row.names(veer.edata)
+```
+
+Feature data - overview.
+```{r veer_fdata}
+#additional feature data
+fdata = fData(VEER)
+dim(fdata)
+head(fdata, 20)
+```
+
+
+
+## 1. Preliminary data visualisation and preprocessing
+
+### 1.1 Finding min / max expression values and number of NaN values.
+```{r}
+#min / max expression values
+min_val = min(veer.edata,na.rm = TRUE)
+max_val = max(veer.edata,na.rm = TRUE)
+
+print(paste0("Min expression value: ", min_val))
+print(paste0("Max expression value: ", max_val))
+
+#NaN values
+print(paste0("Number of NaN values in veer.edata: ", sum(is.nan(veer.edata)))) 
+
+# how many of min/max values
+print(paste0("Number of ", min_val, " values: ", sum(veer.edata==-2, na.rm = T)))
+print(paste0("Number of ", max_val, " values: ", sum(veer.edata==2, na.rm = T)))
+```
+
+### 1.2 Visualizing mean vs variance relationship in untransformed data.
+We can see that mean values are rather close to 0 and that the variance is not higher than 0.6.
+```{r}
+row_variances <- apply(veer.edata, 1, function(x) var(x))
+row_means <- apply(veer.edata, 1, function(x) mean(x))
+plot(row_variances, row_means, pch=19, main="Mean vs. Variance relationship")
+```
+
+### 1.3 Inspecting and removing NaN values.
+First we will check the distribution of NaN's in samples (columns), remove samples containing many NaN values, then check the rows' NaN distribution and replace unknown values by row means.
+
+#### Distribution of NaN's in samples (columns).
+
+```{r}
+# plot nan distribution
+col_na_counts <-apply(veer.edata, 2, function(x) sum(is.na(x))) # vector of numbers of NaN's in each column
+plot(col_na_counts)
+```
+
+Removing column X54 from the data (according to low number of DM samples (and lower than number of NODM) the column with second highest nan content is not removed).
+```{r}
+#deleting the column with more than 10 000 nan values
+veer.edata <- subset(veer.edata, select=-c(X54))
+veer.pdata <- veer.pdata[-54,]
+ncol(veer.edata) #checking if operation was succesful
+nrow(veer.pdata)
+```
+
+
+#### Distribution of NaN's in rows.
+```{r}
+# inspecting numbers of nan's in rows
+row_na_counts <- apply(veer.edata, 1, function(x) sum(is.na(x)))
+plot(row_na_counts)
+
+print(sum(row_na_counts == 77))
+
+```
+
+Replacing remaining NaN values with mean row expression
+```{r}
+#deleting rows with high NaN content (see plot above)
+veer.edata <- veer.edata[row_na_counts <60, ]
+
+# replacing NaN values by row means
+for(i in 1:nrow(veer.edata)) {
+  m <- mean(veer.edata[ i, ], na.rm = TRUE)
+  veer.edata[i, is.na(veer.edata[ i, ])] <- m
+  }
+sum(is.na(veer.edata))
+dim(veer.edata)
+
+rm(col_na_counts, row_na_counts)
+```
+
+
+### 1.4 Visualizing gene expression levels.
+
+Gene expression for two example "DM" and two example "NODM" patients.
+```{r}
+p_nodm_x1 <- as.numeric(veer.edata[,1])
+p_nodm_x45 <- as.numeric(veer.edata[,45])
+
+p_nodm_x44 <- as.numeric(veer.edata[,44])
+p_nodm_x79 <- as.numeric(veer.edata[,77])
+```
+
+```{r}
+hist(p_nodm_x1, breaks=110, xlim=c(-2,2), main="Histogram of expression for patient X1 (NODM)")
+hist(p_nodm_x45, breaks=110, xlim=c(-2,2), main="Histogram of expression for patient X45 (DM)")
+
+hist(p_nodm_x44, breaks=110, xlim=c(-2,2), main="Histogram of expression for patient X44 (NODM)")
+hist(p_nodm_x79, breaks=110, xlim=c(-2,2), main="Histogram of expression for patient X79 (DM)")
+```
+
+
+Histograms with mean gene expression values in DM and NODM groups.
+```{r}
+
+# mean gene expression values in DM and NODM group
+mean_nodm_expression <- apply(veer.edata[,veer.pdata$class=="NODM"] , 1, mean)
+mean_dm_expression <- apply(veer.edata[,veer.pdata$class=="DM"] , 1, mean)
+
+# histograms
+hist(mean_nodm_expression, breaks=110, xlim=c(-1,1), ylim=c(0,5000), main="Histogram of mean gene expression in DM group")
+hist(mean_dm_expression, breaks=110,  xlim=c(-1,1), ylim=c(0,5000), main="Histogram of mean gene expression in NODM group")
+```
+
+#### Boxplots
+Boxplots with expression levels in DM and NODM groups.
+```{r}
+# 2 boxploty
+```
+
+#### Distributions of gene expression in individual samples
+
+Individual boxplots.
+```{r}
+# boxplots for all individual DM samples
+```
+
+```{r}
+# boxplots for all individual NODM samples
+```
+
+
+
+
+## 2. Selecting informative rows (genes) from Veer data
+
+////// tu o tym, że nie ma info czego dotyczy p-value i opieram się na innym badaniu i sama dobieram pvalue (bo tamta za bardzo obcina)
+
+
+### 2.1 T-test for mean expression in DM an NODM groups.
+We will conduct t-test to check in which genes we can observe significantly different expression levels between DM and NODM groups.
+
+```{r}
+# row-wise t-test
+tout = rowttests(x = veer.edata, fac = as.factor(veer.pdata$class))
+head(tout, 4)
+```
+
+Visualising t-test results and selecting genes.
+
+```{r}
+# visualisations of t-test results
+tout_tidy <- gather(tout)
+ggplot(tout_tidy) + geom_histogram(bins = 30,aes(x=value)) + facet_wrap(~ key, scales="free")
+```
+```{r}
+#thresholding
+veer.edata <-veer.edata[tout$p.value < 0.1,]
+dim(veer.edata)
+```
+
+
+
+
+
+
+## 3. Principal Component Analysis of Veer data (using SVD decomposition)
+
+### 3.0 Mean-to-variance relationship in selected subset
+
+Visualizing mean-to-variance relationship
+```{r}
+row_variances <- apply(veer.edata, 1, function(x) var(x))
+row_means <- apply(veer.edata, 1, function(x) mean(x))
+plot(row_variances, row_means, pch=19, main="Mean vs. Variance relationship")
+```
+
+
+
+
+### 3.1 Centering or centering & scaling row expression levels
+
+
+Centering / centering and scaling data (moving all values by current mean value -- to achieve mean=0)
+```{r}
+#data with centered rows (no scaling):
+veer.edata.centered <- t(scale(t(veer.edata), scale=F))
+
+#data with scaled & centered rows:
+veer.edata.scaled <- t(scale(t(veer.edata)))
+```
+
+Visualizing new mean vs variance relationship.
+```{r}
+# no scaling
+veer.centered.row_variances <- apply(veer.edata.centered, 1, function(x) var(x))
+veer.centered.row_means <- apply(veer.edata.centered, 1, function(x) mean(x))
+plot(veer.centered.row_variances, veer.centered.row_means, pch=19, main="Mean vs. Variance relationship")
+
+# scaling
+veer.scaled.row_variances <- apply(veer.edata.scaled, 1, function(x) var(x))
+veer.scaled.row_means <- apply(veer.edata.scaled, 1, function(x) mean(x))
+plot(veer.scaled.row_variances, veer.scaled.row_means, pch=19, main="Mean vs. Variance relationship")
+
+```
+
+
+
+Boxplots of scaled and centered data
+```{r}
+# boxploty dla poszczególnych kolumn
+```
+
+
+
+
+
+### 3.2 Principal Component Analysis using prcomp function (based on SVD) on scaled / no scaled data
+
+
+```{r}
+# pca -- only on previously filtered rows
+veer.pca.genes <- row.names(veer.edata)
+
+# prcomp decomposition (ustawić dobrze parametry! (np nie skalować / centrować już?))
+
+# pca on centered data
+centered.prcomp_out <- prcomp(t(veer.edata.centered), retx = T, center = FALSE, scale. = FALSE,
+       tol = NULL, rank. = 77)
+# pca on scaled data
+scaled.prcomp_out <- prcomp(t(veer.edata.scaled), retx = T, center = FALSE, scale. = FALSE,
+       tol = NULL, rank. = 77)
+```
+
+```{r}
+# centered prcomp results
+prcomp_out <- centered.prcomp_out
+
+print("Prcomp outputs:")
+names(prcomp_out)
+
+print("Rotated data:")
+prcomp_out$x[1:5,1:10]
+print("Rotation coefficients:")
+prcomp_out$rotation[1:10,1:5]
+print("Summary:")
+summary(prcomp_out)
+```
+
+```{r}
+# scaled prcomp results
+prcomp_out <- scaled.prcomp_out
+
+print("Prcomp outputs:")
+names(prcomp_out)
+
+print("Rotated data:")
+prcomp_out$x[1:5,1:10]
+print("Rotation coefficients:")
+prcomp_out$rotation[1:10,1:5]
+print("Summary:")
+summary(prcomp_out)
+```
+
+
+Percent of variance explained by subsequent PC's.
+```{r}
+
+# elbow plot - centerd
+screeplot(centered.prcomp_out, type="lines", main="Elbow plot for centered PCA", npcs=77)
+
+# elbow plot - scaled
+screeplot(scaled.prcomp_out, type="lines", main="Elbow plot for centered & scaled PCA", npcs=77)
+
+# Kaiser criterion -- components with eigenvalues (here: ==variances) greater than one
+#prcomp_out$sdev ^2
+# Kaiser centered
+print(paste0("Kaiser criterion -- centered data -- number of components with eigenvalue >1: ", sum(centered.prcomp_out$sdev ^2 >1)))
+
+# Kaiser scaled
+print(paste0("Kaiser criterion -- scaled data-- number of components with eigenvalue >1: ", sum(scaled.prcomp_out$sdev ^2 >1)))
+
+```
+
+
+
+### 3.2 Analyzing values of PC's in samples.
+
+
+Values of PCi, i=1,2,..,77 for 77 samples.
+
+
+```{r, eval=F}
+#scatter plots of PC's with coloured groups
+for (i in 1:77){
+  pc <- PC[[i]]
+  plot(1:77, PC[[i]], col=PC$V2)
+}
+
+```
+
+
+#### Mean PC values in DM and NODM groups.
+
+###### Centered data
+```{r}
+prcomp_out <- centered.prcomp_out
+
+# mean PC coordinates for NODM and DM samples
+centered.nodm_pc_mean <- apply(prcomp_out$x[veer.pdata$class=="NODM", ], 2, mean)
+centered.dm_pc_mean <- apply(prcomp_out$x[veer.pdata$class=="DM", ], 2, mean)
+
+#plots
+nodm_pc_mean <- centered.nodm_pc_mean
+dm_pc_mean <- centered.dm_pc_mean
+
+# values
+plot(1:77, nodm_pc_mean, col = "blue", xlim = c(0, 80), ylim =c(min(dm_pc_mean, nodm_pc_mean),max(dm_pc_mean, nodm_pc_mean)))
+points(1:77, dm_pc_mean, col = "red")
+
+#differences
+plot(1:77, abs(nodm_pc_mean - dm_pc_mean), type="points", xlim=c(0,80))
+
+# histogram of differences
+hist(abs(nodm_pc_mean - dm_pc_mean), breaks=100, xlim=c(0,max(7, max(abs(nodm_pc_mean - dm_pc_mean)))))
+```
+
+###### Scaled data 
+
+```{r}
+prcomp_out <- scaled.prcomp_out
+
+# mean PC coordinates for NODM and DM samples
+scaled.nodm_pc_mean <- apply(prcomp_out$x[veer.pdata$class=="NODM", ], 2, mean)
+scaled.dm_pc_mean <- apply(prcomp_out$x[veer.pdata$class=="DM", ], 2, mean)
+
+#plots
+nodm_pc_mean <- scaled.nodm_pc_mean
+dm_pc_mean <- scaled.dm_pc_mean
+
+# values
+plot(1:77, nodm_pc_mean, col = "blue", xlim = c(0, 80), ylim =c(min(dm_pc_mean, nodm_pc_mean),max(dm_pc_mean, nodm_pc_mean)))
+points(1:77, dm_pc_mean, col = "red")
+
+#differences
+plot(1:77, abs(nodm_pc_mean - dm_pc_mean), type="points", xlim=c(0,80))
+
+# histogram of differences
+hist(abs(nodm_pc_mean - dm_pc_mean), breaks=100, xlim=c(0,max(7, max(abs(nodm_pc_mean - dm_pc_mean)))))
+```
+
+
+
+
+### Selecting informative PC's for centered and centered-and-scaled PCA data.
+
+
+
+###### Centered data
+
+
+Selecting PC's.
+```{r}
+# centered data
+prcomp_out <- centered.prcomp_out
+nodm_pc_mean <- centered.nodm_pc_mean
+dm_pc_mean <- centered.dm_pc_mean
+
+# min difference in mean group pc value
+threshold <- 1.0
+
+# choosing important pcs for centered data
+centered.selected_pcs <- prcomp_out$x[,abs(nodm_pc_mean - dm_pc_mean)>threshold]
+head(centered.selected_pcs)
+```
+
+
+
+Do selected PC's separate tumor samples well?
+
+```{r}
+# df with additional true class column for ploting
+prcomp_out <- centered.prcomp_out
+PC = data.table(prcomp_out$x,veer.pdata$class)
+PC[1:5,c(1:2,77:78)] # checking correctness of the output
+
+# no scaling scenario
+ggplot(PC) + geom_point(aes(x=1:77, y=PC1, col=as.factor(V2)))
+ggplot(PC) + geom_point(aes(x=1:77, y=PC2, col=as.factor(V2)))
+ggplot(PC) + geom_point(aes(x=1:77, y=PC3, col=as.factor(V2)))
+#ggplot(PC) + geom_point(aes(x=1:77, y=PC12, col=as.factor(V2)))
+
+ggplot(PC) + geom_point(aes(x=PC1, y=PC2, col=as.factor(V2)))
+ggplot(PC) + geom_point(aes(x=PC1, y=PC3, col=as.factor(V2)))
+
+
+```
+
+```{r}
+#library(pca3d)
+pca3d(centered.prcomp_out, group=veer.pdata$class)
+#snapshotPCA3d(file="veer_centered_selected_pcs.png")
+```
+
+
+###### Scaled data
+```{r}
+#scaled_pcs
+prcomp_out <- scaled.prcomp_out
+nodm_pc_mean <- scaled.nodm_pc_mean
+dm_pc_mean <- scaled.dm_pc_mean
+
+threshold <- 5
+
+# choosing important pcs for scaled data
+scaled.selected_pcs <- prcomp_out$x[,abs(nodm_pc_mean - dm_pc_mean)>threshold]
+head(scaled.selected_pcs)
+```
+
+Do selected PC's separate tumor samples well?
+
+
+```{r}
+# df with additional true class column for ploting
+prcomp_out <- scaled.prcomp_out
+PC = data.table(prcomp_out$x,veer.pdata$class)
+
+#scaled pcs -- values in samples
+ggplot(PC) + geom_point(aes(x=1:77, y=PC1, col=as.factor(V2)))
+#ggplot(PC) + geom_point(aes(x=1:77, y=PC2, col=as.factor(V2)))
+ggplot(PC) + geom_point(aes(x=1:77, y=PC4, col=as.factor(V2)))
+ggplot(PC) + geom_point(aes(x=1:77, y=PC8, col=as.factor(V2)))
+```
+
+```{r}
+#library(pca3d)
+inpt <- scaled.prcomp_out$x[,c(1,4,8)]
+pca3d(inpt, group=veer.pdata$class)
+#snapshotPCA3d(file="veer_scaled_selected_pcs.png")
+```
+
+
+
+
+
+
+
+## 4. Building classifiers
+
+
+#### Function for calculating euclidean distance regardless the dimensionality of space.
+```{r}
+euclidean_distance <- function(p1, p2){
+  sqrt( sum((p1 - p2)^2))
+}
+
+# checking if group clusters are not very close to each other
+round(euclidean_distance(nodm_pc_mean, dm_pc_mean),2)
+```
+
+#### General classifying function assignig sample to DM or NODM group according to its distances from groups' centres.
+```{r}
+simple_distance_based_classifier <- function(sample_in_pc_coordinates, gr0_means, gr1_means, vector_with_pc_numbers){
+  # assumption: pc numbers in 4th argument are not greater than lengths of first 3 arguments
+  
+  sample <- sample_in_pc_coordinates[vector_with_pc_numbers]
+  gr0_mean <- gr0_means[vector_with_pc_numbers]
+  gr1_mean <- gr1_means[vector_with_pc_numbers]
+  
+  d0 <- euclidean_distance(sample, gr0_mean)
+  d1 <- euclidean_distance(sample, gr1_mean)
+  
+  # assiging sample to class with center closer to sample coordinates
+  if (d1 <= d0){
+    gr <-"DM"
+  }
+  else{
+    gr<-"NODM"
+  }
+  
+  return(c(d0,d1,gr))
+}
+```
+
+
+
+
+### 4.1 Classifier based on first PC
+
+Classifier c_0 -- classification based on sample PC1 distances from group means.
+Checks if sample PC1 value is closer to the PC1 dm_mean or nodm_mean
+```{r}
+classify_c0 <- function(sample, gr0_means, gr1_means){
+  
+  
+  result <- simple_distance_based_classifier(sample, gr0_means, gr1_means, c(1))
+  return(result)
+
+}
+```
+
+
+### 4.2 Classifier for centered pca data -- based on PC1, PC2, and PC3
+
+Classifier c_1 -- classification based on distance between sample and group means in 3-dimensional space spanned by PC1, PC2 and PC3.
+```{r}
+classify_c1 <- function(sample, gr0_means, gr1_means){
+  
+  result <- simple_distance_based_classifier(sample, gr0_means, gr1_means, c(1,2,3))
+  return(result)
+}
+```
+
+
+### 4.3 Classifier for scaled pca data -- based on PC1, PC4, and PC8
+
+
+Classifier s_1 -- same as c_1, but spanning PC's are: PC1, PC4, PC8 of scaled veer data.
+```{r}
+classify_s1 <- function(sample, gr0_means, gr1_means){
+  
+  result <- simple_distance_based_classifier(sample, gr0_means, gr1_means, c(1,4,8))
+  return(result)
+}
+```
+
+
+
+
+
+# PART II -- Testing
+
+## Testing classifier performance on the test set
+// Vijvier data
+
+## 0. Loading test data
+
+##### Loading Vijver data
+```{r}
+data("VIJVER")
+vijver.pdata=pData(VIJVER)
+vijver.edata=as.matrix(exprs(VIJVER))
+
+dim(vijver.edata)
+dim(vijver.pdata)
+
+vijver.edata[1:5, 1:5]
+head(vijver.pdata)
+
+# checking how many samples have no DM/NODM class assigned
+sum(is.na(vijver.pdata$class))
+```
+
+
+##### Inspecting Vijver data (are genes the same, scale, min/max).
+```{r}
+# ensuring that veer gene names and vijver gene names are the same
+setequal(row.names(vijver.edata), veer.all.genes)
+
+
+# min / max and NaN values in expression data
+min_val <- min(vijver.edata,na.rm = TRUE)
+max_val <- max(vijver.edata,na.rm = TRUE)
+print(paste0("Min expression value: ", min_val))
+print(paste0("Max expression value: ", max_val))
+
+# how many of min/max values
+print(paste0("Number of ", min_val, " values: ", sum(veer.edata==min_val, na.rm = T)))
+print(paste0("Number of ", max_val, " values: ", sum(veer.edata==max_val, na.rm = T)))
+
+```
+
+
+
+## 1. Preprocessing
+
+#### 1.1 Removing samples with unknown metastases class.
+```{r}
+# removing samples with no DM/NODM information
+na_class_samples <- is.na(vijver.pdata$class)
+sum(na_class_samples)
+
+vijver.pdata <- vijver.pdata[! na_class_samples, ]
+vijver.edata <- vijver.edata[, ! na_class_samples ]
+ # checking if output is correct
+sum(is.na(vijver.pdata$class))
+nrow(vijver.pdata)
+ncol(vijver.edata)
+```
+
+
+
+
+
+
+#### 1.2 Selecting only those genes that were used in Veer PCA decomposition.
+
+
+```{r}
+vijver.edata.pca <- vijver.edata[veer.pca.genes,]
+
+# checking dimensions of df and order of rows
+dim(vijver.edata.pca)
+identical(row.names(vijver.edata.pca), veer.pca.genes)
+```
+
+
+
+
+#### 1.3 Checking for missing values in filtered set.
+```{r}
+sum(is.na(vijver.edata.pca))
+```
+
+
+
+##### Distribution of NaN's in columns and rows.
+```{r}
+
+# distribution of nan's in samples
+col_na_counts <-apply(vijver.edata.pca, 2, function(x) sum(is.na(x)))
+plot(col_na_counts)
+
+# inspecting distribution of nan's in rows
+row_na_counts <- apply(vijver.edata.pca, 1, function(x) sum(is.na(x)))
+plot(row_na_counts)
+
+```
+
+
+
+
+
+###### Columns -- deleting samples with more than 10 NaN's.
+```{r}
+# removing columns with more than 10 NaN values
+col_na_thr <- 10
+vijver.edata.pca <- vijver.edata.pca[, col_na_counts < col_na_thr]
+vijver.pdata <- vijver.pdata[col_na_counts < col_na_thr,]
+dim(vijver.edata.pca)
+dim(vijver.pdata)
+
+# distribution of nan's in samples after deleting columns
+col_na_counts <-apply(vijver.edata.pca, 2, function(x) sum(is.na(x)))
+plot(col_na_counts)
+
+# distribution of nan's in rows after deleting columns
+row_na_counts <- apply(vijver.edata.pca, 1, function(x) sum(is.na(x)))
+plot(row_na_counts)
+
+```
+
+###### Rows -- replacing remaining missing values with row means.
+```{r}
+# replacing na values with row means
+for(i in 1:nrow(vijver.edata.pca)) {
+  m <- mean(vijver.edata.pca[ i, ], na.rm = TRUE)
+  vijver.edata.pca[i, is.na(vijver.edata.pca[ i, ])] <- m
+}
+
+sum(is.na(vijver.edata.pca))
+dim(vijver.edata.pca)
+
+row_na_counts <- apply(vijver.edata.pca, 1, function(x) sum(is.na(x)))
+plot(row_na_counts)
+
+rm(col_na_counts, row_na_counts)
+```
+
+
+
+### Centering rows (???? and scaling if veer data were scaled)
+```{r}
+# vijver data for comparisions with centered veer pca results:
+vijver.edata.centered <- t(scale(t(vijver.edata.pca), scale=F))
+
+# vijver data for comparisions with scaled veer pca results: 
+vijver.edata.scaled <- t(scale(t(vijver.edata.pca), scale=T))
+```
+
+
+## Translating test data to PC coordinates
+
+Translating Vijver samples to veer PC coordinates.
+```{r}
+#mnożenie macierzy
+# cutting rotation matrices to 20 pcs (no higher pcs used; more than only selected ones - for convenience; less than 77 to lower memory cost)
+
+# centered vijver - centered veer pc coordinates
+vijver.edata.centered.pc.coeff <- t(vijver.edata.centered) %*% centered.prcomp_out$rotation[,1:20] #now each row corresponds to one sample
+
+# scaled  vijver - scaled veer pc coordinates
+vijver.edata.scaled.pc.coeff <- t(vijver.edata.scaled) %*% scaled.prcomp_out$rotation[,1:20] #now each row corresponds to one sample
+
+
+# result:
+# matrix with vijver samples in rows; their veer_pc coordinates in columns
+#
+#          | pc1 | pc2 | ... | pc_r |
+# ----------------------------------|
+# sample_1 |  .  |  .  |  .  |   .  |
+# sample_2 |  .  |  .  |  .  |   .  |
+# .        |  .  |  .  |  .  |   .  |
+# sample_n |  .  |  .  |  .  |   .  |
+#-----------------------------------|
+#
+
+
+
+
+```
+
+
+
+
+
+## Classification
+
+### c_0 clasifier
+
+```{r}
+
+# classifying samples with different classifiers
+
+#############
+# centered samples
+nodm_pc_mean <- centered.nodm_pc_mean
+dm_pc_mean <- centered.dm_pc_mean
+
+predictions.centered_c0 <- apply(vijver.edata.centered.pc.coeff, 1, function(sample) classify_c0(sample, nodm_pc_mean, dm_pc_mean))
+predictions.centered_c1 <- apply(vijver.edata.centered.pc.coeff, 1, function(sample) classify_c1(sample, nodm_pc_mean, dm_pc_mean))
+
+############
+# scaled samples
+nodm_pc_mean <- scaled.nodm_pc_mean
+dm_pc_mean <- scaled.dm_pc_mean
+
+predictions.scaled_c0 <- apply(vijver.edata.scaled.pc.coeff, 1, function(sample) classify_c0(sample, nodm_pc_mean, dm_pc_mean))
+predictions.scaled_s1 <- apply(vijver.edata.centered.pc.coeff, 1, function(sample) classify_s1(sample, nodm_pc_mean, dm_pc_mean))
+
+
+
+
+```
+
+
+```{r}
+
+
+bind_true_outcome_and_name_columns <- function(predictions){
+  
+  predictions <- cbind(t(predictions), vijver.pdata$class)
+  names <- c("nodm_cor", "dm_cor", "predicted_class", "true_class")
+  colnames(predictions) <- names
+  return(predictions)
+  
+}
+```
+
+```{r}
+predictions.centered_c0 <- bind_true_outcome_and_name_columns(predictions.centered_c0)
+predictions.centered_c1 <- bind_true_outcome_and_name_columns(predictions.centered_c1)
+
+predictions.scaled_c0 <- bind_true_outcome_and_name_columns(predictions.scaled_c0)
+predictions.scaled_s1 <- bind_true_outcome_and_name_columns(predictions.scaled_s1)
+```
+
+
+#### Analyzing the results
+```{r}
+
+count_confusion_matrix_entries <- function(predicted_classes, true_classes){
+
+  tp <- sum(predicted_classes=="DM" & true_classes=="DM")
+  tn <- sum(predicted_classes=="NODM" & true_classes=="NODM")
+  fp <- sum(predicted_classes=="DM" & true_classes=="NODM")
+  fn <- sum(predicted_classes=="NODM" & true_classes=="DM")
+  
+  acc <- (tp+tn)/(tp+tn+fp+fn)
+  
+  df <- c(tp, tn, fp, fn, acc)
+  df <- t(as.data.frame(df))
+  colnames(df) <- c("tp", "tn", "fp", "fn", "acc")
+  
+  return(df)
+  
+}
+
+```
+
+
+
+```{r}
+c0_centered.stats <- count_confusion_matrix_entries(predictions.centered_c0[,"predicted_class"], vijver.pdata$class)
+c0_scaled.stats <- count_confusion_matrix_entries(predictions.scaled_c0[,"predicted_class"],  vijver.pdata$class)
+
+c1_centered.stats <- count_confusion_matrix_entries(predictions.centered_c1[,"predicted_class"], vijver.pdata$class)
+s1_centered.stats <- count_confusion_matrix_entries(predictions.scaled_s1[,"predicted_class"], vijver.pdata$class)
+
+stats <- rbind(c0_centered.stats, c0_scaled.stats, c1_centered.stats, s1_centered.stats)
+rownames(stats) <- c("centered_pc1", "scaled_pc1", "centered_pc1-3", "scaled_pc_1.4.8")
+
+stats
+```
+
+
+```{r}
+# visualizing results
+
+b<-barplot(stats[,1:4],
+           legend= c("PC1 (centered)", "PC1 (scaled)", "Centered - chosen PC's (pc1, pc2, pc3)", "Scaled - chosen PC's (pc1, pc4, pc8)"),
+           beside= TRUE,las=2,cex.axis=0.7,cex.names=0.7,ylim=c(0,185), col=c("cornflowerblue","cornsilk4","red","orange"), main="Classification results for compared runs")
+b
+tx2 <- stats[,1:4]
+text(b, tx2+10, as.character(tx2),pos = 3, cex = 0.5, col = "darkgreen")
+```
+
+
+
+```{r}
+ a <- barplot(stats[,5],
+              main="Classifications' accuracy",
+              col=c("cornflowerblue","cornsilk4","red","orange"),
+              names.arg = c("pc1 (centered)", "pc1 (scaled)", "3 pc's (centered)", "3 pcs (scaled)"),
+              ylim= c(0,1)
+              
+              )
+stats[,"fn"]/(stats[,"fn"] + stats[,"tp"])
+```
+
+###### False negative rate
+How many from all DM samples were classified as NODM samples.
+
+```{r}
+ c <- barplot(stats[,"fn"]/(stats[,"fn"] + stats[,"tp"]),
+              main="False negative rate",
+              col=c("cornflowerblue","cornsilk4","red","orange"),
+              names.arg = c("pc1 (centered)", "pc1 (scaled)", "3 pc's (centered)", "3 pcs (scaled)"),
+              ylim= c(0,1)
+              
+              )
+fnr <- stats[,"fn"]/(stats[,"fn"] + stats[,"tp"])
+fnr
+```
+
+###### Proportion of ommited DM samples (fn) according to whole test dataset
+```{r}
+print(paste0("Number of ommited DM (false negatives) for c_0 - centered: ", stats[1,"fn"], "/", sum(stats[1,1:4]), " (", round(stats[1,"fn"]/sum(stats[1,1:4]),2), ")"   ))
+print(paste0("Number of ommited DM (false negatives) for c_0 - scaled: ", stats[2,"fn"], "/", sum(stats[2,1:4]), " (", round(stats[2,"fn"]/sum(stats[2,1:4]),2), ")"   ))
+print(paste0("Number of ommited DM (false negatives) for c_1: ", stats[3,"fn"], "/", sum(stats[3,1:4]), " (", round(stats[3,"fn"]/sum(stats[3,1:4]),2), ")"   ))
+print(paste0("Number of ommited DM (false negatives) for s_1: ", stats[4,"fn"], "/", sum(stats[4,1:4]), " (", round(stats[4,"fn"]/sum(stats[4,1:4]),2), ")"   ))
+
+```

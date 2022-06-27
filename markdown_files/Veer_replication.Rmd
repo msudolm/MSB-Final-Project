@@ -1,0 +1,701 @@
+---
+title: "Final Project - Veer replication"
+author: "Małgorzata Sudoł"
+#date: "6/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Replication of van't Veer study
+
+```{r packages}
+library(genefilter) # t-test for large data
+library(gplots) #heatmap.2
+
+library(tidyverse)
+library(qvalue)
+```
+
+
+## 1. Loading VEER Data
+
+###### Loading Veer Expression Set.
+```{r loading_veer}
+#loading data
+library("cancerdata")
+data("VEER")
+dim(VEER)
+class(VEER)
+
+#save(VEER, file="ver.Rdata")
+``` 
+
+ExpressionSet summary.
+```{r}
+VEER
+``` 
+
+
+
+###### Extracting phenotype data.
+```{r veer_pdata}
+#phenotype data
+veer.pdata=pData(VEER)
+
+dim(veer.pdata)
+head(veer.pdata)
+
+# size of each class
+sum(veer.pdata$class == "DM")
+sum(veer.pdata$class == "NODM")
+```
+
+
+###### Extracting expression data.
+```{r veer_veer.edata}
+# expression data
+veer.edata=as.matrix(exprs(VEER))
+
+dim(veer.edata)
+veer.edata[1:10, 1:10]
+
+# vector with gene names (used in further steps)
+veer.all.genes <- row.names(veer.edata)
+```
+
+
+
+
+
+## 2. Basic data analysis
+
+### Min/max values in expression data, unknown values counts
+
+```{r veer_max_min_values}
+
+#min / max expression values
+min_val = min(veer.edata,na.rm = TRUE)
+max_val = max(veer.edata,na.rm = TRUE)
+
+print(paste0("Min expression value: ", min_val))
+print(paste0("Max expression value: ", max_val))
+
+print(paste0("Number of NaN values in veer.edata: ", sum(is.nan(veer.edata)))) 
+
+# how many of min/max values
+print(paste0("Number of ", min_val, " values: ", sum(veer.edata==-2, na.rm = T)))
+print(paste0("Number of ", max_val, " values: ", sum(veer.edata==2, na.rm = T)))
+
+```
+
+
+### Removing unknown values.
+
+Distribution of NaN's in columns.
+```{r}
+col_nan_counts <-apply(veer.edata, 2, function(x) sum(is.nan(x))) # vector of numbers of NaN's in each column
+plot(col_nan_counts)
+```
+
+
+
+Removing column with more than 10 000 NaN velues (X54) from the data (according to low number of DM samples (and lower than number of NODM) only the firs highest-nan-content column was removed).
+```{r}
+#deleting X54 sample from expression set and pData
+veer.edata <- subset(veer.edata, select=-c(X54))
+veer.pdata <- veer.pdata[-54,]
+
+#checking if column was successfully removed
+ncol(veer.edata) 
+nrow(veer.pdata)
+```
+
+
+Distribution of NaN's in rows.
+```{r}
+# inspecting numbers of nan's in rows
+row_nan_counts <- apply(veer.edata, 1, function(x) sum(is.nan(x)))
+plot(row_nan_counts)
+
+# how many NaN's remainded
+print(sum(row_nan_counts == 77))
+
+```
+
+
+Replacing remaining NaN values with mean row expression.
+```{r}
+#deleting rows with high NaN content (see plot above)
+veer.edata <- veer.edata[row_nan_counts <60, ]
+
+# replacing NaN values by row means
+for(i in 1:nrow(veer.edata)) {
+  m <- mean(veer.edata[ i, ], na.rm = TRUE)
+  veer.edata[i, is.na(veer.edata[ i, ])] <- m
+  }
+sum(is.nan(veer.edata))
+dim(veer.edata)
+
+rm(col_nan_counts, row_nan_counts)
+```
+
+
+
+
+
+
+### Example expression levels for DM and NODM patients.
+
+```{r}
+p_nodm_x1 <- as.numeric(veer.edata[,1])
+p_nodm_x44 <- as.numeric(veer.edata[,44])
+```
+
+```{r}
+hist(p_nodm_x1, breaks=110, xlim=c(-2,2), main="Histogram of expression for patient X1 (NODM)")
+hist(p_nodm_x44, breaks=110, xlim=c(-2,2), main="Histogram of expression for patient X44 (NODM)")
+```
+
+
+
+
+
+
+
+
+# Vvan't Veer study replication 
+
+
+## 1. Selecting 'most predictive genes'
+
+Fold change >=2 in at least one of 77 samples (in this data max fold change is 2).
+P-value for t-test < 0.01 (comparing mean expression of each gene between DM and NODM group).
+
+
+### 1.1 Twofold expression
+Selecting rows with at least one |value| >= 2.
+Here: this means exact -2 or 2.
+```{r veer_twofold}
+
+# rows for which 2 or -2 in row
+twofold_rows <- apply(veer.edata, 1, function(x) any(x %in% c(-2,2)))
+veer.edata_2fold <- veer.edata[twofold_rows,]
+
+# how many rows were selected
+dim(veer.edata_2fold)
+
+#number of rows selected
+nrows <- nrow(veer.edata_2fold)
+```
+
+
+### 1.2 T-test thresholding
+
+Conducting t-test to compare "DM" and "NODM" row mean values.
+```{r veer_t_pval}
+
+# t-test -- mean row values in DM and NODM groups
+twofold_tout = rowttests(x = veer.edata_2fold, fac = as.factor(veer.pdata$class))
+head(twofold_tout, 6)
+
+#visualising t-test results
+twofold_tout_tidy <- gather(twofold_tout)
+ggplot(twofold_tout_tidy) + geom_histogram(bins = 30,aes(x=value)) + facet_wrap(~ key, scales="free")
+```
+
+
+
+There is no description provided what does the p-value refers to, so, according to t-test statistics visualization, p-value threshold = 0.08 was chosen.
+```{r veer_tout_under_trh}
+
+# adding p-value column to the data
+veer.edata <-veer.edata_2fold[ twofold_tout$p.value < 0.08,]
+dim(veer.edata)
+
+# comparing to Veer study
+dim(veer.edata_2fold[ twofold_tout$p.value < 0.01,])
+```
+
+
+
+
+
+## 2. Unsupervised two-dimensional clustering 
+
+
+Defining color palette similar to van't Veer heatmap.
+```{r}
+my_palette <- colorRampPalette(c("green", "black", "red"))(n = 199)
+```
+
+Two-dimensional unsupervised clustering (--> rows and columns).
+```{r unsupervised_heatmap}
+# two-dimensional clustering -- heatmap
+#png("veer1_clustering.png",height=700,width=700)
+heatmap = heatmap.2(t(veer.edata),
+          main = "Unsupervised clustering heatmap", # heatmap title
+          labRow = NULL,
+          notecol="black",    
+          density.info="none",  
+          trace="none",         
+          margins =c(5,5),     
+          col=my_palette,       
+          dendrogram="column",     
+          scale = "none",
+          Colv="Rowv"
+)
+#dev.off()
+```
+
+
+
+
+## 2. Supervised classification
+
+### 2.1 Correlation with outcome for `r dim(veer.edata)[1]` genes selected in 1.
+
+Calculating correlations: gene expression values vs outcome (DM/NODM) and selecting genes strongest correlated with output.
+
+```{r row_pearson_correlation}
+
+# vector of ones (for DM samples) and zeros (for NODM samples)
+is_dm = as.integer(veer.pdata$class == "DM")
+
+# vector of correlation values for each gene
+gene_cor <- as.data.frame(apply(veer.edata, 1, function(x) cor(x, is_dm, method="pearson")))
+colnames(gene_cor) <- c("gene_correlation_with_outcome")
+veer.edata <- cbind(veer.edata, gene_cor)
+
+# selecting genes with |correlation| > 0.2
+veer.edata <- veer.edata[abs(gene_cor) > 0.2,]
+dim(veer.edata)
+
+#comparing with van't Veer threshold
+dim(veer.edata[abs(gene_cor) > 0.3,])
+```
+
+
+
+### 2.2 Ordering genes from 2. by coefficient magnitude
+
+Ordering rows by descending correlation absolute value.
+```{r order_by_pearson_cor_abs}
+veer.edata <-veer.edata[order(-abs(veer.edata$gene_cor)),]
+
+```
+
+
+### 2.3 Selecting the optimal number of top correlated genes to include in a classifier
+
+Leave-one-out cross validation.
+```{r }
+
+# function returning correlations with NODM and DM mean gene expression and true outcome for given vector of features' expression
+cor_and_outcome <- function(thr, df, sample_col_nr, col_ind_vect_g0, col_ind_vect_g1){
+  
+  thr1 <- min(c(thr, nrow(df)))
+  
+  # extracting current column
+  x <- df[1:thr1, sample_col_nr]
+  # is column DM or NODM
+  outcm <-ifelse(veer.pdata[sample_col_nr,"class"] == "DM",1,0)
+  
+  # subseting 'voting' genes in g0 and g1 groups
+  group0 <- df[1:thr1, col_ind_vect_g0]
+  group1 <- df[1:thr1, col_ind_vect_g1]
+  
+  # creating mean gene expression vectors for group g0 and g1
+  y0 <- apply(group0, 1, mean)
+  y1 <- apply(group1, 1, mean)
+  
+  # correlation of current column with NODM and DM mean expression vectors
+  cor0 <- cor(x, y0, method="pearson")
+  cor1 <- cor(x, y1, method="pearson")
+  
+  return (c(cor0, cor1, outcm))
+}
+
+
+
+
+
+# vector with sizes of subsequent feature subsets 
+feature_thrs <- seq(5, (ceiling(nrow(veer.edata)/5))*5, 5)
+# vector with columns' numbers
+columns <- seq(ncol(veer.edata)-1)
+# vectors indicating if a column is a DM/NODM column
+dm_columns <- ifelse(veer.pdata[,"class"] == "DM",TRUE,FALSE)
+nodm_columns <- ifelse(veer.pdata[,"class"] == "NODM",TRUE,FALSE)
+
+#empty df for gathering classifier outcomes
+outcomes <- data.frame(cor0 = character(0), cor1 = numeric(0), true_outcome = numeric(0), features_num=numeric(0)) 
+
+
+for (t in feature_thrs){ #subseting features (5,10,15,...,n)
+  
+  for (j in columns){ #leave-one-out cross vlidation
+    
+    v_g0 <- nodm_columns
+    v_g1 <- dm_columns
+    
+    # excluding j-th column from 'voting' columns
+    if (v_g0[j] == TRUE){
+      v_g0[j] <- FALSE
+    }
+    else{
+      v_g1[j] <- FALSE
+    }
+    
+    # vector of j with NODM correlation, j with DM correlation, true jth column outcome
+    votes <- cor_and_outcome(t, veer.edata[,1:ncol(veer.edata)-1], j, v_g0, v_g1)
+    votes[4] <- min(c(t, nrow(df)))
+    #adding vector with correlations and outcome to general df with results
+    outcomes[nrow(outcomes) + 1,] = votes
+    
+  }
+  
+  
+}
+
+```
+
+```{r}
+# checking results of cross-validation process
+dim(outcomes)
+head(outcomes, 46)
+sum(is.na(outcomes))
+```
+
+
+Adding information about predicted outcome to data frame.
+```{r}
+# adding column with classifier outcome (NODM if cor0 > cor1)
+classifier_outcome <- as.numeric(outcomes$cor0 <= outcomes$cor1)
+outcomes <-cbind(outcomes, classifier_outcome)
+head(outcomes, 3)
+```
+
+
+Counting confusion matrix loadings for each size of predictors group.
+```{r}
+# summarising and visualising results of cross-validation
+
+# empty df for results
+cv_results <- data.frame(features_number = character(0), tp = numeric(0), tn = numeric(0), fp=numeric(0), fn=numeric(0)) 
+
+
+
+  for (f_num in unique(outcomes$features_num)){
+    out <- outcomes[outcomes$features_num == f_num,]
+    tp <- sum(out$true_outcome ==1 & out$classifier_outcome==1)
+    tn <- sum(out$true_outcome ==0 & out$classifier_outcome==0)
+    fp <- sum(out$true_outcome==0 & out$classifier_outcome==1)
+    fn <- sum(out$true_outcome==1 & out$classifier_outcome==0)
+    print(c(f_num, tp, tn, fp, fn))
+    
+    cv_results[nrow(cv_results) +1,] <- c(f_num, tp, tn, fp, fn)
+  }
+  
+
+# computing accuracy
+cv_results <- transform(cv_results, acc = round((tp+tn)/(tp+tn+fp+fn),4))
+
+```
+
+Visualizing accuracy and number of false negatives for cross-validation results.
+```{r}
+# visualise good choices, fn and acc
+plot(cv_results[,1], cv_results[,6], type="lines", xlab="number of genes", ylab="accuracy", main="Classification accuracy for different number of top genes")
+# (and other quality metrics)
+plot(cv_results[,1], cv_results[,"fn"], type="lines", xlab="number of genes", ylab="accuracy", main="Number of false negatives for different number of genes")
+```
+
+Visualizing false negatives and fale positives on one plot.
+Accuracy plot with grid.
+```{r}
+
+#ggplot(cv_results, aes(x=features_number)) + 
+  #geom_line(aes(y = acc), color = "darkred") #+ 
+  #geom_line(aes(y = fn), color="steelblue", linetype="twodash") 
+conf_matr_data <- as.data.frame(cv_results)
+conf_matr_data$features_number <- as.numeric(as.character(conf_matr_data$features_number))
+conf_matr_data$acc <- as.numeric(as.character(conf_matr_data$acc))
+conf_matr_data
+
+ggplot(conf_matr_data, aes(x=features_number)) + 
+  geom_line(aes(y = acc, colour = "accuracy")) +
+  scale_x_continuous(breaks=seq(5, 285, 20))
+
+
+#ggplot(conf_matr_data, aes(x=features_number)) +
+#  geom_line(aes(y = fn/(fn+fp+tp+tn), colour = "% false negatives"))+
+#  geom_line(aes(y = fp/(fn+fp+tp+tn), colour = "% false positives"))
+
+
+
+ggplot(conf_matr_data, aes(x=features_number)) +
+  geom_line(aes(y = fn, colour = "number of false negatives"))+
+  geom_line(aes(y = fp, colour = "number of false positives")) +
+  scale_x_continuous(breaks=seq(5, 285, 20))
+
+rm(fn,fp,tn,tp)
+```
+
+
+Choosing final number of genes included in classifier based on results of cross-validation.
+```{r}
+# final choice of optimal number of (top n) genes to include in classifier
+top_n_num <- 175
+
+#names and order of top_n_predictive genes
+predictive_genes_names_ordered <- rownames(veer.edata)[1:top_n_num]
+```
+
+
+
+
+
+### 5. Define classifier
+
+Defining classifier based on selected number of top `r top_n_num` genes and with 0.4 correlation threshold for NODM correlation - threshold as in Vijver study.
+```{r}
+# defining classifier(s)
+
+# classifier with nodm threshold (as in Vijver 2002)
+classify_0.4 <- function(sample, good_prognosis_mean_expressions){
+  #assumption: sample and good_prognosis_mean_expressions have the same genes in the same order
+  cor <- cor(sample, good_prognosis_mean_expressions, method="pearson")
+  if (cor > 0.4){ 
+    class <- "NODM" }
+  else{ 
+    class <- "DM" }
+  return(c(cor, class))
+}
+```
+
+Second classifier -- based on selected number of top `r top_n_num` genes but with simple comparison of group correlation ("DM" when correlation wit mean DM expression >= correlation with NODM expression)
+```{r}
+# exactly the same classification as for training
+classify <- function(sample, good_prognosis_mean_expressions, bad_prognosis_mean_expressions){
+  #assumption: sample and good_prognosis_mean_expressions have the same genes in the same order
+  cor0 <- cor(sample, good_prognosis_mean_expressions, method="pearson")
+  cor1 <- cor(sample, bad_prognosis_mean_expressions, method="pearson")
+  
+  
+  if (cor0 > cor1){ 
+    class <- "NODM" }
+  else{ 
+    class <- "DM" }
+  return(c(cor0, cor1, class))
+}
+
+```
+
+Saving defined models.
+```{r}
+#save(classify_0.4, classify, file = "veer_like_classifiers.RData") 
+```
+
+
+Preparing predictor vector.
+```{r}
+
+#count mean gene expression values for NODM group
+nodm_mean_predictive_expression <- as.data.frame(apply(veer.edata[1:top_n_num, veer.pdata$class=="NODM"], 1, mean))
+# select only these rows in input data frame
+# order rows in input data frame as in model vector
+```
+
+
+
+
+
+
+## Testing classifier's performance on Vijver set
+
+### Loading Vijver data.
+```{r}
+data("VIJVER")
+vijver.pdata=pData(VIJVER)
+vijver.edata=as.matrix(exprs(VIJVER))
+
+dim(vijver.edata)
+dim(vijver.pdata)
+
+vijver.edata[1:5, 1:5]
+head(vijver.pdata)
+
+# checking how many samples have no DM/NODM class assigned
+sum(is.na(vijver.pdata$class))
+
+```
+
+
+### Inspecting Vijver data (are genes the same, scale, min/max).
+```{r}
+# ensuring that veer gene names and vijver gene names are the same
+setequal(row.names(vijver.edata), veer.all.genes)
+
+# removing samples with no DM/NODM information
+nan_class_samples <- is.na(vijver.pdata$class)
+
+vijver.pdata <- vijver.pdata[! nan_class_samples, ]
+vijver.edata <- vijver.edata[, ! nan_class_samples ]
+ # checking if output is correct
+sum(is.na(vijver.pdata$class))
+nrow(vijver.pdata)
+ncol(vijver.edata)
+
+# min / max and NaN values in expression data
+min_val <- min(vijver.edata,na.rm = TRUE)
+max_val <- max(vijver.edata,na.rm = TRUE)
+print(paste0("Min expression value: ", min_val))
+print(paste0("Max expression value: ", max_val))
+
+#print(paste0("Number of NaN values in vijver.edata: ", sum(is.na(vijver.edata)))) 
+
+# how many of min/max values
+print(paste0("Number of ", min_val, " values: ", sum(veer.edata==min_val, na.rm = T)))
+print(paste0("Number of ", max_val, " values: ", sum(veer.edata==max_val, na.rm = T)))
+
+
+```
+
+
+
+
+### Preparing Vijver data as classifier input.
+```{r}
+vijver.edata.top_n <- vijver.edata[predictive_genes_names_ordered,]
+
+# checking dimensions of df and order of rows
+dim(vijver.edata.top_n)
+identical(row.names(vijver.edata.top_n), predictive_genes_names_ordered)
+```
+
+
+#### NaN values in selected subset of Vijver data.
+
+Distribution of NaN's in columns (removing columns with high NaN number).
+```{r}
+# how many NaN's
+sum(is.na(vijver.edata.top_n))
+
+# distribution of nan's in samples
+col_na_counts <-apply(vijver.edata.top_n, 2, function(x) sum(is.na(x)))
+plot(col_na_counts)
+
+# removing columns with more than 10 NaN values
+vijver.edata.top_n <- vijver.edata.top_n[, col_na_counts < 10] #should result with 188-2=186 columns
+vijver.pdata <- vijver.pdata[col_na_counts < 10,]
+dim(vijver.edata.top_n)
+dim(vijver.pdata)
+
+# checking if columns were successfully removed
+col_na_counts <-apply(vijver.edata.top_n, 2, function(x) sum(is.na(x)))
+plot(col_na_counts)
+```
+
+Distribution of NaN's in rows (replacing by row means).
+```{r}
+# inspecting distribution of na in rows
+row_na_counts <- apply(vijver.edata.top_n, 1, function(x) sum(is.na(x)))
+plot(row_na_counts)
+
+# replacing na values with row means
+for(i in 1:nrow(vijver.edata.top_n)) {
+  m <- mean(vijver.edata.top_n[ i, ], na.rm = TRUE)
+  vijver.edata.top_n[i, is.na(vijver.edata.top_n[ i, ])] <- m
+}
+
+sum(is.na(vijver.edata.top_n))
+dim(vijver.edata.top_n)
+
+row_na_counts <- apply(vijver.edata.top_n, 1, function(x) sum(is.na(x)))
+plot(row_na_counts)
+
+rm(col_na_counts, row_na_counts)
+```
+
+
+### Classification
+```{r}
+
+#reminder: nodm_mean_predictive_expression <- as.data.frame(apply(veer.edata[1:top_n_num, veer.pdata$class=="NODM"], 1, mean))
+test.classification.results <- as.data.frame(apply(vijver.edata.top_n, 2, function(sample) classify_0.4(sample, nodm_mean_predictive_expression)))
+
+```
+
+
+#### Analyzing classification results
+
+```{r}
+test.classification.results <- t(test.classification.results)
+test.classification.results <- as.data.frame(cbind(test.classification.results, vijver.pdata$class))
+colnames(test.classification.results) <- c("cor_with_nodm", "predicted_class", "class")
+
+#confusion matrix entries
+tp <- sum(test.classification.results$class=="DM" & test.classification.results$predicted_class=="DM")
+tn <- sum(test.classification.results$class=="NODM" & test.classification.results$predicted_class=="NODM")
+
+fp <- sum(test.classification.results$class=="NODM" & test.classification.results$predicted_class=="DM")
+fn <-sum(test.classification.results$class=="DM" & test.classification.results$predicted_class=="NODM")
+
+all <- nrow(test.classification.results)
+
+print("Results of classification cor_nodm > 0.4 (a in Vijver)")
+print(paste0("tp/tn/fp/fn: ", tp, ", ", tn, ", ", fp,  ", ",fn, ". Sum = ", all))
+print(paste0("Model accuracy: ", round((tp+tn)/all,2 )))
+print(paste0("Number of omitted DM (false negatives): ", fn, "/", all, " (", round(fn/all,2), ")"   ))
+print(paste0("FNR (false negative rate; fn/(fn+tp)): ", fn, "/", (fn+tp), " (", round(fn/(fn+tp),2), ")"   ))
+rm(fn,fp,tn,tp)
+```
+
+
+
+### Classification using the same classifier as in training (but only for top `r top_n_num` genes)
+
+#### Classification.
+```{r}
+
+dm_mean_predictive_expression <- as.data.frame(apply(veer.edata[1:top_n_num, veer.pdata$class=="DM"], 1, mean))
+
+#reminder: nodm_mean_predictive_expression <- as.data.frame(apply(veer.edata[1:top_n_num, veer.pdata$class=="NODM"], 1, mean))
+test.classification.results2 <- as.data.frame(apply(vijver.edata.top_n, 2, function(sample) classify(sample, nodm_mean_predictive_expression, dm_mean_predictive_expression)))
+
+```
+
+
+#### Results.
+```{r}
+test.classification.results2 <- t(test.classification.results2)
+test.classification.results2 <- as.data.frame(cbind(test.classification.results2, vijver.pdata$class))
+colnames(test.classification.results2) <- c("cor_with_nodm", "cor_with_dm", "predicted_class", "class")
+test.classification.results2[,1] <- as.numeric(as.character(test.classification.results2[,1]))
+test.classification.results2[,1] <- as.numeric(as.character(test.classification.results2[,1]))
+
+
+# confussion matrix entries
+tp <- sum(test.classification.results2$class=="DM" & test.classification.results2$predicted_class=="DM")
+tn <- sum(test.classification.results2$class=="NODM" & test.classification.results2$predicted_class=="NODM")
+
+fp <- sum(test.classification.results2$class=="NODM" & test.classification.results2$predicted_class=="DM")
+fn <-sum(test.classification.results2$class=="DM" & test.classification.results2$predicted_class=="NODM")
+
+all <- nrow(test.classification.results2)
+
+print("Results of classification cor_dm > cor_nodm")
+print(paste0("tp/tn/fp/fn: ", tp, ", ", tn, ", ", fp,  ", ",fn, ". Sum = ", all))
+print(paste0("Model accuracy: ", round((tp+tn)/all,2 )))
+print(paste0("Number of omitted DM (false negatives): ", fn, "/", all, " (", round(fn/all,2), ")"   ))
+print(paste0("FNR (false negative rate; fn/(fn+tp)): ", fn, "/", (fn+tp), " (", round(fn/(fn+tp),2), ")"   ))
+```
+
+
+
+
+
