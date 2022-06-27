@@ -6,7 +6,7 @@
  <br>
 
 <h3 align="center"> Modeling Complex Biological Systems </h3>
-<h3 align="center"> FINAL PROJECT </h3>
+<h2 align="center"> FINAL PROJECT </h2>
 
  <br>
 
