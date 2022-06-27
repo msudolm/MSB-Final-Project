@@ -6,7 +6,7 @@
  <br>
 
 <h3 align="center"> Modeling Complex Biological Systems </h3>
-<h2 align="center"> FINAL PROJECT </h2>
+<h2 align="center"> FINAL PROJECT REPORT </h2>
 
  <br>
 
@@ -75,7 +75,7 @@ In both expression sets, expression values range from -2 to 2; according to [1],
  <br>
  
 ### Methods
-All steps of analysis are available on github [GitHub Repository](https://github.com/msudolm/MSB-Final-Project/blob/main/README.md) as RMarkdown files.
+All steps of analysis are available on github [GitHub Repository](https://github.com/msudolm/MSB-Final-Project) as RMarkdown files.
 <br>
 
 #### Veer study replication
@@ -97,7 +97,7 @@ Next, according to veer study, unsupervised 2-dimensional clustering was perform
 <br>
 
 
-![Unsupervised clustering heatmap](https://github.com/msudolm/msb_breast_cancer_project/blob/main/unsupervised_clustering_heatmap.png)
+![Unsupervised clustering heatmap](https://github.com/msudolm/MSB-Final-Project/blob/main/report_figures/unsupervised_clustering_heatmap.png)
 
 
 **Figure 1** <br>
@@ -116,11 +116,12 @@ The final number of genes to include in a classifier was set to 175 top genes, a
 This number is significantly greater than n=70 genes that maximizes accuracy in Veer study (here we can observe acc=0.82, fn=2 fp=12 for n=70 and acc=0.86, fn=2 fp=9 for n=175)
 
 **Figure 2a**
-![Cross-validation accuracy](https://github.com/msudolm/msb_breast_cancer_project/blob/main/cross_validation_accuracy.png)
+![Cross-validation accuracy](https://github.com/msudolm/MSB-Final-Project/blob/main/report_figures/cross_validation_accuracy.png)
 **Figure 2b**
-![Cross-validation fp and fn](https://github.com/msudolm/msb_breast_cancer_project/blob/main/cross_validation_fn_and_fp.png)
+![Cross-validation fp and fn](https://github.com/msudolm/MSB-Final-Project/blob/main/report_figures/cross_validation_fn_and_fp.png)
 
 <br>
+
 **Figure 2** <br>
 **(a)** Accuracy values for leave-one-out cross-validation for correlation-magnitude-ordered genes from Veer.<br>
 **(b)** False positives and false negatives numbers for leave-one-out cross-validation for correlation-magnitude-ordered genes from Veer. <br>
@@ -169,7 +170,7 @@ All five classifiers were tested on appropriate input data versions of the Vijve
 
 ## Results
 
-![Cross-validation fp and fn](https://github.com/msudolm/msb_breast_cancer_project/blob/main/performance_table.jpeg)
+![Cross-validation fp and fn](https://github.com/msudolm/MSB-Final-Project/blob/main/report_figures/performance_table.jpeg)
 
 **Table 3** <br>
 Performance of DM-classifiers.
