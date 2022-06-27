@@ -75,7 +75,7 @@ In both expression sets, expression values range from -2 to 2; according to [1],
  <br>
  
 ### Methods
-All steps of analysis are available on github ![GitHub Repository](https://github.com/msudolm/MSB-Final-Project/blob/main/README.md) as RMarkdown files.
+All steps of analysis are available on github [GitHub Repository](https://github.com/msudolm/MSB-Final-Project/blob/main/README.md) as RMarkdown files.
 <br>
 
 #### Veer study replication
@@ -94,10 +94,16 @@ As the t-test p-values were different from those reported in van't Veer (setting
 Next, according to veer study, unsupervised 2-dimensional clustering was performed (**Figure 1**). Replicated clustering results and those presented in Veer are much the same. The one difference observed is the presence of additional clustered area in the half of heatmap width, but it may be also the result of splitting the cluster in the right-bottom corner of Veer heatmap in two smaller clusters.
 
 
+<br>
+
 
 ![Unsupervised clustering heatmap](https://github.com/msudolm/msb_breast_cancer_project/blob/main/unsupervised_clustering_heatmap.png)
 
+
+**Figure 1** <br>
+Heatmap with results of unsupervised two-dimensional clustering of van't Veer data.
 <br>
+
 
 ###### Supervised classification 
 According to the Veer description (paper and supplementary data), the supervised classification was conducted as follows:
@@ -109,11 +115,16 @@ Next, genes were ordered by magnitude of correlation coefficient (descending). A
 The final number of genes to include in a classifier was set to 175 top genes, according to cross-validation results [**Figure 2a, 2b**].
 This number is significantly greater than n=70 genes that maximizes accuracy in Veer study (here we can observe acc=0.82, fn=2 fp=12 for n=70 and acc=0.86, fn=2 fp=9 for n=175)
 
-
+**Figure 2a**
 ![Cross-validation accuracy](https://github.com/msudolm/msb_breast_cancer_project/blob/main/cross_validation_accuracy.png)
-
+**Figure 2b**
 ![Cross-validation fp and fn](https://github.com/msudolm/msb_breast_cancer_project/blob/main/cross_validation_fn_and_fp.png)
 
+<br>
+**Figure 2** <br>
+**(a)** Accuracy values for leave-one-out cross-validation for correlation-magnitude-ordered genes from Veer.<br>
+**(b)** False positives and false negatives numbers for leave-one-out cross-validation for correlation-magnitude-ordered genes from Veer. <br>
+<br>
 <br>
 
 #### Experimenting with VEER data
@@ -159,6 +170,11 @@ All five classifiers were tested on appropriate input data versions of the Vijve
 ## Results
 
 ![Cross-validation fp and fn](https://github.com/msudolm/msb_breast_cancer_project/blob/main/performance_table.jpeg)
+
+**Table 3** <br>
+Performance of DM-classifiers.
+<br>
+<br>
 
 Results of five classification runs on Vijver data are shown in the above table (**Table 3**).
 It can be concluded, that in general, the accuracy of pc-based classifiers outperformed veer-like classifiers (acc = 0.62 - 0.71 vs acc = 0.42 - 0.61) on these data, but also misclassification and FNR rates were higher in pc-based classification (0.17 - 0.19 vs 0.1 - 0.17 DM samples omitted (fn/(tp+tn+fp+fn)) in PC-based and veer-like classifiers accordingly), false negative rate:  FNR = 0.4-0.68 vs FNR = 0.1-0.42.
